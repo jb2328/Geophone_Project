@@ -1,0 +1,4 @@
+Hardware Documentation URLs:
+
+https://www.proto-pic.co.uk/sparkfun-sen-11744-geophone-sm-24.html
+https://www.waveshare.com/wiki/1.8inch_LCD_Module
