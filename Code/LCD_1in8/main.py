@@ -44,11 +44,11 @@ def main():
 		draw.text((33, 22), 'WaveShare ', fill = "BLUE")
 		draw.text((32, 36), 'Electronic ', fill = "BLUE")
 		draw.text((28, 48), '1.44inch LCD ', fill = "BLUE")
-	LCD.LCD_ShowImage(image,0,0)
+	LCD.LCD_ShowImage(image,0,0,50,50)
 	LCD_Config.Driver_Delay_ms(500)
 	
 	image = Image.open('time.bmp')
-	LCD.LCD_ShowImage(image,0,0)
+	LCD.LCD_ShowImage(image,0,0,50,50)
 	
 	#while (True):
 	

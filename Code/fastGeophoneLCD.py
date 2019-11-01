@@ -10,8 +10,8 @@ import sys
 #import LCD_1in8
 #import LCD_Config
 
-sys.path.append('LCD_ST7735')
-from LCD_ST7735 import LCD_ST7735
+#sys.path.append('LCD_ST7735')
+from st7735_ijl20.st7735 import ST7735
 
 from PIL  import Image
 from PIL import ImageDraw
@@ -24,14 +24,14 @@ DISPLAY_WIDTH = 160                # LCD panel width in pixels
 DISPLAY_HEIGHT = 128               # LCD panel height
 
 # Pixel size and coordinates of the 'Weight' display
-DISPLAY_WEIGHT_HEIGHT = 128
-DISPLAY_WEIGHT_WIDTH = 160
-DISPLAY_WEIGHT_COLOR_FG = "WHITE"
-DISPLAY_WEIGHT_COLOR_BG = "BLACK"
-DISPLAY_WEIGHT_COLOR_BAR = 20
-DISPLAY_WEIGHT_X = 0
-DISPLAY_WEIGHT_Y = 0
-DISPLAY_WEIGHT_RIGHT_MARGIN = 10
+#DISPLAY_WEIGHT_HEIGHT = 128
+#DISPLAY_WEIGHT_WIDTH = 160
+COLOR_FG = "WHITE"
+COLOR_BG = "BLACK"
+#DISPLAY_WEIGHT_COLOR_BAR = 20#
+#DISPLAY_WEIGHT_X = 0
+#DISPLAY_WEIGHT_Y = 0
+#DISPLAY_WEIGHT_RIGHT_MARGIN = 10
 
 
 FONT_BIG = ImageFont.truetype('fonts/truetype/freefont/FreeMonoBold.ttf', 20)
@@ -51,7 +51,7 @@ chan = AnalogIn(ads, ADS.P0, ADS.P1)
 
 # Begin LCD stuff 
 #LCD = LCD_1in8.LCD()
-LCD = LCD_ST7735()
+LCD = ST7735()
 
 print ("**********Init LCD**********")
 
@@ -60,7 +60,7 @@ print ("**********Init LCD**********")
 
 LCD.begin()
 
-image = Image.new("RGB", (DISPLAY_WEIGHT_WIDTH, DISPLAY_WEIGHT_HEIGHT), DISPLAY_WEIGHT_COLOR_FG)
+image = Image.new("RGB", (DISPLAY_WIDTH, DISPLAY_HEIGHT), COLOR_FG)
 draw = ImageDraw.Draw(image)
 
 print ("***draw line")
@@ -76,28 +76,20 @@ draw.text((45, 40), 'Sensor', fill = "BLUE",font = FONT_BIG)
 draw.text((10, 60), 'for footstep detection', fill = "BLUE", font = FONT_SMALL)
         
 #LCD.LCD_ShowImage(image,0,0,w=160,h=128)
-LCD.display_window(image,
-                      DISPLAY_WEIGHT_X,
-                      DISPLAY_WEIGHT_Y,
-                      DISPLAY_WEIGHT_WIDTH,
-                      DISPLAY_WEIGHT_HEIGHT)
+LCD.display(image)
 
-#delay_ms(1000)
+time.sleep(1)
 
-image = Image.new("RGB", (DISPLAY_WEIGHT_WIDTH, DISPLAY_WEIGHT_HEIGHT), DISPLAY_WEIGHT_COLOR_BG)
+image = Image.new("RGB", (DISPLAY_WIDTH, DISPLAY_HEIGHT), COLOR_BG)
 draw = ImageDraw.Draw(image)
 
 #LCD.LCD_ShowImage(image,0,0,w=160,h=128)
-LCD.display_window(image,
-                      DISPLAY_WEIGHT_X,
-                      DISPLAY_WEIGHT_Y,
-                      DISPLAY_WEIGHT_WIDTH,
-                      DISPLAY_WEIGHT_HEIGHT)
+LCD.display(image)
 
 def updateScreenNumeric(value):
     value= "Geophone value: "+str(value)
     
-    image = Image.new("RGB", (DISPLAY_WEIGHT_WIDTH, DISPLAY_WEIGHT_HEIGHT), DISPLAY_WEIGHT_COLOR_BG)
+    image = Image.new("RGB", (160,20), COLOR_BG)
     draw = ImageDraw.Draw(image)
 
     draw.text((0, 0), value, fill = "WHITE", font = FONT_SMALL)
@@ -105,16 +97,16 @@ def updateScreenNumeric(value):
     #LCD.LCD_ShowImage(image,0,120,w=160,h=20)
     LCD.display_window(image,
                       0,
-                      120,
+                      110,
                       160,
-                      20)
+                      18)
 
     #LCD_Config.Driver_Delay_ms(250)
 
 def updateScreenVisual(value):
     
     #setup for background
-    image = Image.new("RGB", (DISPLAY_WEIGHT_WIDTH, DISPLAY_WEIGHT_HEIGHT), DISPLAY_WEIGHT_COLOR_BG)
+    image = Image.new("RGB", (DISPLAY_WIDTH, 108), COLOR_BG)
     draw = ImageDraw.Draw(image)
 
     #draw dark green
@@ -161,7 +153,7 @@ def updateScreenVisual(value):
                       0,
                       0,
                       160,
-                      110)
+                      108)
     #LCD_Config.Driver_Delay_ms(25)
     
 def getValue():
@@ -172,6 +164,7 @@ def getValue():
 def loop():
     while True:
         print(getValue())
+        time.sleep(.15)
         updateScreenNumeric(getValue())
         updateScreenVisual(getValue())
 
