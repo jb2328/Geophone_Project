@@ -3,6 +3,7 @@
 # for dev / debug
 DEBUG_LOG = False
 
+print("started importing packages")
 import time
 import board
 import busio
@@ -24,6 +25,7 @@ from PIL import ImageDraw
 from PIL import ImageFont
 from PIL import ImageColor
 
+print("finished importing packages")
 
 # info sent in json packet to feed handler
 SENSOR_ID = 'footstep_detector'
@@ -45,7 +47,6 @@ FONT_SMALL = ImageFont.truetype('fonts/truetype/freefont/FreeMonoBold.ttf', 10)
 LCD=None
 chan=None
 
-
 class Sensor(object):
 	def __init__(self):
 		global LCD
@@ -56,12 +57,13 @@ class Sensor(object):
 		self.sample_history = [None]*self.SAMPLE_HISTORY_SIZE
 
 		#load config here if have it
-
+		GPIO.cleanup()
 		LCD=self.init_lcd()
 		chan=self.init_geophone()
 
 	def init_lcd(self):
 		LCD=ST7735()
+		LCD.begin()
 		print("starting LCD")
 
 		image=Image.new("RGB", (DISPLAY_WIDTH, DISPLAY_HEIGHT), "WHITE")
@@ -181,32 +183,7 @@ class Sensor(object):
 		global chan
 		#time.sleep(0.1)
 		return abs(chan.value)
-
-	
-	def loop(self):
-		now = time.time()
-		prev_time = now
-	   
 		
-		while True:
-			try:
-				intensity=self.getValue()
-			   # print(intensity)
-				time.sleep(.15)
-				self.updateScreenNumeric(intensity)
-				self.updateScreenVisual(intensity)
-				
-				now = time.time() # floating point time in seconds since epoch
-				if (now - prev_time > 5) or (intensity>32):
-				  self.sendEvent(intensity)
-				  prev_time = now
-					
-			  #  time.sleep(1.0)
-				print("{:5} now {}, prev {} ".format(intensity, time.ctime(now)[10:20],time.ctime(prev_time)[10:20]))
-			except (KeyboardInterrupt, SystemExit):
-				self.goodbye_screen()
-				self.finish()
-	
 	def sendEvent(self,sensor_reading):
 		ts=time.time()
 		print ("SENDING DATA {}, {}".format(sensor_reading, time.ctime(ts)))
@@ -232,9 +209,34 @@ class Sensor(object):
 		
 	def finish(self):
 	   	print("\n"+"GPIO cleanup()...")
-	   	#GPIO.cleanup()
+	   	GPIO.cleanup()
 	   	print("Bye bye")
 	   	sys.exit()
+	
+	def loop(self):
+		now = time.time()
+		prev_time = now
+		
+		while True:
+			try:
+				intensity=self.getValue()
+			   # print(intensity)
+				time.sleep(.15)
+				self.updateScreenNumeric(intensity)
+				self.updateScreenVisual(intensity)
+				
+				now = time.time() # floating point time in seconds since epoch
+				if (now - prev_time > 5) or (intensity>16):
+				  self.sendEvent(intensity)
+				  prev_time = now
+					
+			  #  time.sleep(1.0)
+				print("{:5} now {}, prev {} ".format(intensity, time.ctime(now)[10:20],time.ctime(prev_time)[10:20]))
+			except (KeyboardInterrupt, SystemExit):
+				self.goodbye_screen()
+				self.finish()
+	
+
 	   			
 ##main code
 
@@ -243,5 +245,5 @@ if __name__ =="__main__":
 
 	g.loop()
 
-	g.finish()
+	#g.finish()
 

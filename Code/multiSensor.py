@@ -44,14 +44,20 @@ FONT_SMALL = ImageFont.truetype('fonts/truetype/freefont/FreeMonoBold.ttf', 10)
 # Declare globals
 LCD=None
 chan=None
-
-#GPIO.setmode(GPIO.BOARD) set to BCM by default
-
+runMain=None
+runInterrupt=None
+#allowInterrupt=None
+intensity=None
+#GPIO.setmode(GPIO.BOARD) set to BCM by default 
 class Sensor(object):
 	def __init__(self):
 		global LCD
 		global chan
-
+		
+		global runMain
+		global runInterrupt
+		global allowInterrupt
+		
 		self.SAMPLE_HISTORY_SIZE = 100
 		self.sample_history_index = 0
 		self.sample_history = [None]*self.SAMPLE_HISTORY_SIZE
@@ -60,7 +66,7 @@ class Sensor(object):
 
 		LCD=self.init_lcd()
 		chan=self.init_geophone()
-		PIN=16
+		PIN=26
 		
 		GPIO.setup(PIN,GPIO.IN)
 		
@@ -72,11 +78,10 @@ class Sensor(object):
 		GPIO.add_event_detect(PIN, GPIO.RISING, bouncetime=300)#detects if PIN high or low
 		
 		GPIO.add_event_callback(PIN, callback=mic_callback)
-		
-		
 
 	def init_lcd(self):
 		LCD=ST7735()
+		LCD.begin()
 		print("starting LCD")
 
 		image=Image.new("RGB", (DISPLAY_WIDTH, DISPLAY_HEIGHT), "WHITE")
@@ -97,8 +102,6 @@ class Sensor(object):
 
 		return LCD
 		
-
-            
 	def init_geophone(self):
 		global chan
 				   
@@ -139,60 +142,54 @@ class Sensor(object):
 						  18)
 	
 		#LCD_Config.Driver_Delay_ms(250)
-	
-	def updateScreenVisual(self,value):
+
+	def scrollingBar(self):
+	    BAR_CONFIG={"x":0,"y":0,"w":161,"h":60,"step":1}
+	    lcdBar= LCD.add_bar(BAR_CONFIG)
+	    return lcdBar
 		
-		#setup for background
-		image = Image.new("RGB", (DISPLAY_WIDTH, 108), COLOR_BG)
+	def intensityBar(self, level):
+		lineThick=10
+			#setup for background
+		image = Image.new("RGB", (DISPLAY_WIDTH, 50), COLOR_BG)
 		draw = ImageDraw.Draw(image)
+		colors=[(0,0,0),(0,200,0),(250,250,0),(255,100,0),(255,0,0),(100,0,0)]
+
+		initY=-lineThick/2
+		for i in range(level):
+			draw.line([(0,initY),(160,initY)], fill =colors[i] ,width = lineThick)
+			initY+=lineThick
+
+		LCD.display_window(image,
+								  0,
+								  60,
+								  160,
+								  100)
 	
-		#draw dark green
+		
+	def updateIntensityBar(self,value):
+		
 		if(value<=16):
-			draw.line([(0,10),(159,10)], fill = (0,100,0),width = 20)
-		
-		#draw dark green, light green
+				self.intensityBar(1)
+				
 		if(value>16 and value<=48):
-			draw.line([(0,10),(159,10)], fill = (0,100,0),width = 20)
-			draw.line([(0,30),(159,30)], fill = (0,200,0),width = 20)
-		
+			self.intensityBar(2)
+
 		#draw dark green, light green, yellow
 		if(value>48 and value<=128):
-			draw.line([(0,10),(159,10)], fill = (0,100,0),width = 20)
-			draw.line([(0,30),(159,30)], fill = (0,200,0),width = 20)
-			draw.line([(0,50),(159,50)], fill = (250,250,0),width = 20)
-		
+			self.intensityBar(3)
+
 		#draw dark green, light green, yellow, orange
 		if(value>128 and value<=512):
-			draw.line([(0,10),(159,10)], fill = (0,100,0),width = 20)
-			draw.line([(0,30),(159,30)], fill = (0,200,0),width = 20)
-			draw.line([(0,50),(159,50)], fill = (250,250,0),width = 20)
-			draw.line([(0,70),(159,70)], fill = (255,100,0),width = 20)
+			self.intensityBar(4)
 		
 		#draw dark green, light green, yellow, orange, red
 		if(value>512 and value<=1024):
-			draw.line([(0,10),(159,10)], fill = (0,100,0),width = 20)
-			draw.line([(0,30),(159,30)], fill = (0,200,0),width = 20)
-			draw.line([(0,50),(159,50)], fill = (250,250,0),width = 20)
-			draw.line([(0,70),(159,70)], fill = (255,100,0),width = 20)
-			draw.line([(0,90),(159,90)], fill = (255,0,0),width = 20)
-			
-		#draw dark green, light green, yellow, orange, red, dark red
+			self.intensityBar(5)		
+			#draw dark green, light green, yellow, orange, red, dark red
 		if(value>1024):
-			draw.line([(0,10),(159,10)], fill = (0,100,0),width = 20)
-			draw.line([(0,30),(159,30)], fill = (0,200,0),width = 20)
-			draw.line([(0,50),(159,50)], fill = (250,250,0),width = 20)
-			draw.line([(0,70),(159,70)], fill = (255,100,0),width = 20)
-			draw.line([(0,90),(159,90)], fill = (255,0,0),width = 20)
-			draw.line([(0,110),(159,110)], fill = (100,0,0),width = 20)
-				
-		#LCD.LCD_ShowImage(image,0,0,w=160,h=120)
-		LCD.display_window(image,
-						  0,
-						  0,
-						  160,
-						  108)
-		#LCD_Config.Driver_Delay_ms(25)
-		
+			self.intensityBar(6)
+	
 	def getValue(self):
 		global chan
 		#time.sleep(0.1)
@@ -201,24 +198,45 @@ class Sensor(object):
 	
 	def loop(self):
 		now = time.time()
-		prev_time = now
-	   
+		prevEventSent = now
+		prevLcdUpdate= now
+		lcdBar=self.scrollingBar()
+
+		global runMain
+		runMain=True
+		global runInterrupt
+		runInterrupt=False
+		global allowInterrupt
+		allowInterrupt=True
 		
+
 		while True:
 			try:
-				intensity=self.getValue()
-			   # print(intensity)
-				time.sleep(.15)
-				self.updateScreenNumeric(intensity)
-				self.updateScreenVisual(intensity)
-				
 				now = time.time() # floating point time in seconds since epoch
-				if (now - prev_time > 5) or (intensity>32):
-				  self.sendEvent(intensity)
-				  prev_time = now
+				#try:
+				if(runInterrupt==False):
+					allowInterrupt=False
+					print("Main Reading Started (Interrupts not allowed)")
+					intensity=self.getValue()
+					allowInterrupt=True
+					print("Main Reading Finished (Interrupts allowed)")
+				#except:
+				else:
+					intensity=0
 					
+				if (now-prevLcdUpdate >0.15):
+					self.updateScreenNumeric(intensity)
+					self.updateIntensityBar(intensity)
+					lcdBar.next(intensity/5)
+					prevLcdUpdate=time.time()
+				
+				if (now - prevEventSent > 5) or (intensity>32):
+					self.sendEvent(intensity)
+					prevEventSent = time.time()
+	
 			  #  time.sleep(1.0)
-				print("{:5} now {}, prev {} ".format(intensity, time.ctime(now)[10:20],time.ctime(prev_time)[10:20]))
+				#print("{:5} now {}, prev {} ".format(intensity, time.ctime(now)[10:20],time.ctime(prevEventSent)[10:20]))
+			#	print("loop finished at {:.3f} secs.".format(time.process_time() - t_start))
 			except (KeyboardInterrupt, SystemExit):
 				self.goodbye_screen()
 				self.finish()
@@ -236,13 +254,30 @@ class Sensor(object):
 													  ]
 									}
 		self.send_data(post_data, ACP_TOKEN)
+		time.sleep(0.1)
 		
 		if DEBUG_LOG:
 			 print("loop send data at {:.3f} secs.".format(time.process_time() - t_start))
 			 
 	def sendEventMic(self):
+		print("Attempting Interrupt Start ")
+		global runMain
+		global runInterrupt
+		global allowInterrupt 
+		if(allowInterrupt):
+			runMain=False
+			runInterrupt=True
+			print("Interrupt allowed, Main stopped ")
 			ts=time.time()
-			intensity=self.getValue()
+			try:
+				print("Interrupt Reading Start")
+				intensity=self.getValue()
+				print("Interrupt Reading Finished") #sampling getValue() too often can cause an IO error
+			
+			except():
+				print("Failed to read sensor during interrupt")
+				intensity=0
+				
 			print ("SENDING DATA {}, {}, {}".format(intensity, 1, time.ctime(ts)))
 			post_data = { 'request_data': [ { 'acp_id': SENSOR_ID,
 											  'acp_type': SENSOR_TYPE,
@@ -254,10 +289,15 @@ class Sensor(object):
 														  ]
 										}
 			self.send_data(post_data, ACP_TOKEN)
+			time.sleep(0.1)
+			print("Back to Main, Interrupt finished ")
+			runInterrupt=False
+			runMain=True
 			
 			if DEBUG_LOG:
 				 print("loop send data at {:.3f} secs.".format(time.process_time() - t_start))
-
+		else:
+			print("Interrupt not allowed")
 	
 
 	def goodbye_screen(self):
@@ -268,10 +308,12 @@ class Sensor(object):
 		time.sleep(1)
 		
 	def finish(self):
-	   	print("\n"+"GPIO cleanup()...")
-	   	#GPIO.cleanup()
-	   	print("Bye bye")
-	   	sys.exit()
+	    print("\n"+"SPI cleanup()...")
+	    LCD.cleanup()
+	    print("\n"+"GPIO cleanup()...")
+	    GPIO.cleanup()
+	    print("Bye bye")
+	    sys.exit()
 	   			
 ##main code
 
@@ -279,6 +321,6 @@ if __name__ =="__main__":
 	g=Sensor()
 
 	g.loop()
-
-	g.finish()
+	print("Bye ")
+#	g.finish()
 

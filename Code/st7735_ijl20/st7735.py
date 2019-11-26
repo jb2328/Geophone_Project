@@ -1,16 +1,29 @@
 # Raspberry Pi LCD support via ST7735 control chip
 
-import RPi.GPIO as GPIO
-import spidev
 import time
 import numbers
 import time
 import numpy as np
+import math
 
 from PIL import Image
 from PIL import ImageDraw
 
+SIMULATION_MODE = False
+
+try:
+    import RPi.GPIO as GPIO
+    import spidev
+except:
+    SIMULATION_MODE = True
+
 SPI_CLOCK_HZ = 9000000 # 9 MHz
+
+# parameters for a default bar chart on display
+DEFAULT_BAR = { "x": 0, "y": 0, "w": 160, "h": 40, # top-left coords and width, height.
+                "y_max": 5000, # max value for bar, will be scaled to h pixels
+                "step": 1      # how many pixels to step in x direction for next()
+              }
 
 # ------------------------------------------
 # ST7735 display controller chip command set
@@ -121,13 +134,19 @@ SCAN_DIR_DFT = U2D_R2L
 
 # SPI device, bus = 0, device = 0
 
-SPI = spidev.SpiDev(0, 0)
-
-def epd_digital_write(pin, value):
-    GPIO.output(pin, value)
+if not SIMULATION_MODE:
+    SPI = spidev.SpiDev(0, 0)
 
 def delay_ms(xms):
     time.sleep(xms / 1000.0)
+
+# Most significant byte of a 16-bit value
+def MSB(x):
+    return (x >> 8) & 0xff
+
+# Least significant byte
+def LSB(x):
+    return x & 0xff
 
 class ST7735(object):
     """Representation of an ST7735 TFT LCD."""
@@ -160,10 +179,9 @@ class ST7735(object):
         # set up i/o pins
         self.GPIO_init()
 
-        # Create an image buffer.
-        self.buffer = Image.new('RGB', (width, height))
-
     def GPIO_init(self):
+        if SIMULATION_MODE:
+            return
         """Initialize GPIO pins for ST7735 comms"""
 
         GPIO.setmode(GPIO.BCM)
@@ -197,6 +215,9 @@ class ST7735(object):
         data (False).  Chunk_size is an optional size of bytes to write in a
         single SPI transaction, with a default of 4096.
         """
+        if SIMULATION_MODE:
+            return
+
         # Set DC low for command, high for data.
         GPIO.output(self._dc, is_data)
         # Convert scalar argument to list so either can be passed as parameter.
@@ -216,17 +237,10 @@ class ST7735(object):
         self.send(data, True)
 
     def send_byte(self, byte):
+        if SIMULATION_MODE:
+            return
         GPIO.output(self._dc, True)
         SPI.writebytes([byte])
-
-    def clear(self, color=(0,0,0)):
-        """Clear the image buffer to the specified RGB color (default black)."""
-        width, height = self.buffer.size
-        self.buffer.putdata([color]*(width*height))
-
-    def draw(self):
-        """Return a PIL ImageDraw instance for 2D drawing on the image buffer."""
-        return ImageDraw.Draw(self.buffer)
 
     def WriteData_NLen16Bit(self, Data, DataLen):
         GPIO.output(self._dc, GPIO.HIGH)
@@ -235,7 +249,7 @@ class ST7735(object):
             SPI.writebytes([Data & 0xff])
 
     """    Common register initialization    """
-    def LCD_InitReg(self):
+    def setup(self):
         #ST7735R Frame Rate
         self.send_command(ST7735_FRMCTR1)
         self.send_data([ 0x01, 0x2C, 0x2D])
@@ -331,33 +345,24 @@ class ST7735(object):
             self.send_byte( MemoryAccessReg_Data & 0xf7)    #RGB color filter panel
 
     #/********************************************************************************
-    #function:  Set the display point (Xpoint, Ypoint)
+    #function:  send_color_pixels
     #parameter:
-    #       xStart :   X direction Start coordinates
-    #       xEnd   :   X direction end coordinates
+    #       color  :   565 RGB 16-bit value
     #********************************************************************************/
-    def LCD_SetCursor (self, Xpoint, Ypoint ):
-        self.set_window ( Xpoint, Ypoint, Xpoint , Ypoint )
+    def send_color_pixels(self, color , width,  height):
+        self.WriteData_NLen16Bit(color,width * height)
 
     #/********************************************************************************
-    #function:  Set show color
+    #function:  set_pixel_color
     #parameter:
-    #       Color  :   Set show color
+    #       x :   The x coordinate of the point
+    #       y :   The y coordinate of the point
+    #       color  :   565 RGB 16-bit value
     #********************************************************************************/
-    def LCD_SetColor(self, Color , width,  height):
-        self.WriteData_NLen16Bit(Color,width * height)
-
-    #/********************************************************************************
-    #function:  Point (Xpoint, Ypoint) Fill the color
-    #parameter:
-    #       Xpoint :   The x coordinate of the point
-    #       Ypoint :   The y coordinate of the point
-    #       Color  :   Set the color
-    #********************************************************************************/
-    def LCD_SetPointlColor (self,  Xpoint,  Ypoint, Color ):
-        if ( ( Xpoint <= self.width ) and ( Ypoint <= self.height ) ):
-            self.LCD_SetCursor (Xpoint, Ypoint)
-            self.LCD_SetColor ( Color , 1 , 1)
+    def set_pixel_color(self,  x,  y, color ):
+        if ( ( x <= self.width ) and ( y <= self.height ) ):
+            self.set_window(x, y, x, y)
+            self.send_color_pixels( color , 1 , 1)
 
     #/********************************************************************************
     #function:  Fill the area with the color
@@ -366,25 +371,25 @@ class ST7735(object):
     #       Ystart :   Start point y coordinate
     #       Xend   :   End point coordinates
     #       Yend   :   End point coordinates
-    #       Color  :   Set the color
+    #       color  :   565 RGB 16-bit value
     #********************************************************************************/
-    def LCD_SetArealColor (self, Xstart, Ystart, Xend, Yend, Color):
+    def LCD_SetArealColor (self, Xstart, Ystart, Xend, Yend, color):
         if (Xend > Xstart) and (Yend > Ystart):
             self.set_window( Xstart , Ystart , Xend , Yend  )
-            self.LCD_SetColor ( Color ,Xend - Xstart , Yend - Ystart )
+            self.send_color_pixels( color ,Xend - Xstart , Yend - Ystart )
 
     #/********************************************************************************
     #function:
     #           Clear screen
     #********************************************************************************/
-    def LCD_Clear(self):
+    def clear(self):
         if ((self.scan_direction == L2R_U2D) or
                     (self.scan_direction == L2R_D2U) or
                     (self.scan_direction == R2L_U2D) or
                     (self.scan_direction == R2L_D2U)) :
-            self.LCD_SetArealColor(0,0, LCD_X_MAXPIXEL , LCD_Y_MAXPIXEL  , Color = 0xFFFF)#white
+            self.LCD_SetArealColor(0,0, LCD_X_MAXPIXEL , LCD_Y_MAXPIXEL  , color = 0xFFFF)#white
         else:
-            self.LCD_SetArealColor(0,0, LCD_Y_MAXPIXEL , LCD_X_MAXPIXEL  , Color = 0xFFFF)#white
+            self.LCD_SetArealColor(0,0, LCD_Y_MAXPIXEL , LCD_X_MAXPIXEL  , color = 0xFFFF)#white
 
     #/********************************************************************************
     #function:
@@ -401,7 +406,7 @@ class ST7735(object):
         self.reset()
 
         #Set the initialization register
-        self.LCD_InitReg()
+        self.setup()
 
         #Set the display scan and color transfer modes
         self.set_scan()
@@ -414,7 +419,7 @@ class ST7735(object):
         #Turn on the LCD display
         self.send_command(ST7735_DISPON)
 
-        self.LCD_Clear()
+        self.clear()
 
     #/********************************************************************************
     #function:  Sets the start position and size of the display area
@@ -447,6 +452,9 @@ class ST7735(object):
 
         self.send_command( ST7735_RAMWR )
 
+    # -------------------------------------
+    # ----- RESET THE LCD DISPLAY  --------
+    # -------------------------------------
     def reset(self):
         """Reset the display, if reset pin is connected."""
         if self._rst is not None:
@@ -457,18 +465,20 @@ class ST7735(object):
             GPIO.output(self._rst, GPIO.HIGH)
             time.sleep(0.100)
 
+    # -------------------------------------
+    # ----- CLEANUP AT END OF USE  --------
+    # -------------------------------------
+    def cleanup(self):
+        print("ST7735 cleanup()")
+        SPI.close()
+
     # -----------------------------------------------------------------------
     # Display a full-screen image
     # -----------------------------------------------------------------------
     def display(self, image=None):
-        """Write the display buffer or provided image to the hardware.  If no
-        image parameter is provided the display buffer will be written to the
-        hardware.  If an image is provided, it should be RGB format and the
+        """Write the provided image to the hardware, it should be RGB format and the
         same dimensions as the display hardware.
         """
-        # By default write the internal buffer to the display.
-        if image is None:
-            image = self.buffer
         # Set address bounds to entire display.
         self.set_window( 0, 0, self.width, self.height )
         # Convert image to array of 16bit 565 RGB data bytes.
@@ -483,14 +493,9 @@ class ST7735(object):
     # display an image within a window on the screen
     # -----------------------------------------------------------------------
     def display_window(self, image, x, y, w, h):
-        """Write the display buffer or provided image to the hardware.  If no
-        image parameter is provided the display buffer will be written to the
-        hardware.  If an image is provided, it should be RGB format and the
-        same dimensions as the display hardware.
+        """Write the provided image to the hardware, it should be RGB format and
+         w pixels x h pixels
         """
-        # By default write the internal buffer to the display.
-        if image is None:
-            image = self.buffer
         # Set address bounds to entire display.
         self.set_window( x, y, x+w, y+h)
         # Convert image to array of 16bit 565 RGB data bytes.
@@ -500,4 +505,109 @@ class ST7735(object):
         pixelbytes = list(self.image_to_data(image))
         # Write data to hardware.
         self.send_data(pixelbytes)
+
+    # -----------------------------------------------------------------------
+    # Add a bar chart to the display
+    # -----------------------------------------------------------------------
+
+    # Initialize a 'Bar' object, and return object when created.
+    def add_bar(self, config=None):
+        global DEFAULT_BAR
+
+        # Note this ST7735 object (self) is passed to the Bar() as a parameter.
+        if config == None:
+            bar = Bar(self, DEFAULT_BAR)
+        else:
+            bar = Bar(self, config)
+
+        bar.clear()
+        return bar
+
+# ---------------------------
+# Bar graph
+# ---------------------------
+
+# Draw a bar chart across the LCD
+# For each value will draw a vertical bar plus a blank vertical margin to the right of it, as the
+# use-case is expected to be a horizontal scroll of new bars.
+class Bar(object):
+
+    # Initialization for bar object
+    def __init__(self, lcd, config):
+
+        self.lcd = lcd
+
+        self.setting = config
+
+        # pixel byte patterns of horizontal rows of a new column
+        # The width of the column in *pixels* is half the length of bar_on (each pixel is 2 bytes)
+        self.bar_on = [ 0xFF, 0xE0, # yellow
+                        0x00, 0x00, # black
+                        0x00, 0x00  # black
+                      ]
+        self.bar_off = [ #0x00, 0x1F, # blue
+                         0x00, 0x00, # black
+                         0x00, 0x00, # black
+                         0xFF, 0xFF  # black
+                      ]
+        # calculate the width in pixels of drawing for each bar (use math.floor to ensure int value)
+        self.bar_width = math.floor(len(self.bar_on) / 2 + 0.5) # bar_on is in bytes, width is pixels (= 2 bytes each)
+        # Initial x offset for next() column
+        self.next_bx = 0
+
+    # Clear the bar to all black
+    def clear(self):
+        # Build list of required number of bytes (2 bytes = 1 pixel in 565 RGB)
+        pixelbytes = [ 0x00 ] * 2 * self.setting["w"] * self.setting["h"]
+        x1 = self.setting["x"]
+        y1 = self.setting["y"]
+        x2 = x1 + self.setting["w"]
+        y2 = y1 + self.setting["h"]
+        self.lcd.set_window( x1, y1, x2, y2 )
+        self.lcd.send_data(pixelbytes)
+
+    # Display an image in the bar.
+    # It must be exactly bar w x h
+    def display(self, img):
+        self.lcd.display_window( img,
+                            self.setting["x"],
+                            self.setting["y"],
+                            self.setting["w"],
+                            self.setting["h"]
+                          )
+
+    # Add a column to the bar chart
+    # We set a window for just this new column, and fill it with pixels
+    def add(self, bx, by):
+        # Do nothing if added bar would overspill area
+        if bx + self.bar_width > self.setting["w"]:
+            return
+
+        # Define a small window to contain just this column
+        # The width is defined as the length the "bar_on" pixel bytes / 2
+        x1 = self.setting["x"] + bx
+        y1 = self.setting["y"]
+        x2 = x1 + self.bar_width
+        y2 = y1 + self.setting["h"]
+        self.lcd.set_window( x1, y1, x2, y2 )
+
+        # Build a list containing all the pixelbytes
+        pixelbytes = []
+        # For h rows, we first add 'bar_off' horizontal slices, then 'bar_on' slices.
+        for row in range(self.setting["h"]):
+            if row < self.setting["h"] - by:
+                pixelbytes.extend(self.bar_off)
+            else:
+                pixelbytes.extend(self.bar_on)
+
+        # Send the pixelbytes to the LCD
+        self.lcd.send_data(pixelbytes)
+
+    # Add an incremental column and shift
+    def next(self, by):
+        # Add bar to display
+        self.add(self.next_bx, by)
+        # Increment the position for the next bar
+        self.next_bx = (self.next_bx + self.setting["step"]) % self.setting["w"]
+
 
