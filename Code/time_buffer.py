@@ -26,6 +26,9 @@
 
 import time
 from statistics import median
+from statistics import mean
+from statistics import stdev
+
 
 DEFAULT_SETTINGS = { "LOG_LEVEL": 3 } # we need to pass this in the instantiation...
 
@@ -97,7 +100,9 @@ class TimeBuffer(object):
                 while line:
                     line_values = line.split(',')
                     # skip lines (e.g. blank lines) that don't seem to have readings
-                    if len(line_values) == 2:
+                    #print(line_values, len(line_values))
+                    #print(float(line_values[1]))
+                    if len(line_values) == 4:
                         ts = float(line_values[0])
                         value = float(line_values[1])
                         self.sample_history[self.sample_history_index] = { "ts": ts,
@@ -152,8 +157,8 @@ class TimeBuffer(object):
         # we will loop through the buffer until at latest value at sample_history_index-1
         while not finished:
 
-            if self.settings["LOG_LEVEL"] == 1:
-                print("TimeBuffer play index", index)
+            #if self.settings["LOG_LEVEL"] == 1:
+               #print("TimeBuffer play index", index)
 
             sample = self.sample_history[index]
 
@@ -161,6 +166,7 @@ class TimeBuffer(object):
             if sample != None:
                 # HERE WE CALL THE PROVIDED FUNCTION
                 process_sample(sample["ts"], sample["value"])
+               # print(sample["ts"], sample["value"])
                 # And sleep() if we want realistic animation
                 # if realtime then sleep for period between samples
                 if realtime:
@@ -320,10 +326,123 @@ class TimeBuffer(object):
         # Now we have a list of samples with the required duration
         median_value = median(value_list)
 
-        if self.settings["LOG_LEVEL"] == 1:
-            print("median_value for {:.3f} seconds with {} samples = {}".format(end_time - begin_time,
+        #if self.settings["LOG_LEVEL"] == 1:
+        print("median_value for {:.3f} seconds with {} samples = {}".format(end_time - begin_time,
                                                                                 len(value_list),
                                                                                 median_value))
 
         return median_value, next_offset
+    
+    def mean(self, offset, duration):
+    
+            sample = self.get(offset)
+            if sample == None:
+                return None, offset
+            next_offset = offset
+    
+            begin_limit = sample["ts"] - duration
+            if self.settings["LOG_LEVEL"] == 1:
+                print("median begin_limit={}".format(begin_limit))
+    
+            begin_time = sample["ts"] # this will be updated as we loop, to find duration available
+            end_time = sample["ts"]
+    
+            #if self.settings["LOG_LEVEL"] == 1:
+            #    print("median_time begin_time {:.3f}".format(begin_time))
+    
+            value_list = [ sample["value"] ]
+            while True: # Repeat .. Until
+                # select previous index in circular buffer
+                next_offset = (next_offset + 1) % self.SAMPLE_HISTORY_SIZE
+                if next_offset == offset:
+                    # we've exhausted the full buffer
+                    break
+    
+                sample = self.get(next_offset)
+    
+                if sample == None:
+                    if self.settings["LOG_LEVEL"] <= 2:
+                        print("median looked back to None value")
+                    # we've exhausted the values in the partially filled buffer
+                    break
+    
+                # see if we have reached the end of the intended period
+                if sample["ts"] < begin_limit:
+                    break
+    
+                value_list.append(sample["value"])
+    
+                begin_time = sample["ts"]
+    
+            # If we didn't get enough samples, return with error
+            if len(value_list) < 3:
+                if self.settings["LOG_LEVEL"] <= 2:
+                    print("mean not enough samples ({})".format(len(value_list)))
+                return None, None
+    
+            # Now we have a list of samples with the required duration
+            mean_value = mean(value_list)
+    
+            #if self.settings["LOG_LEVEL"] == 1:
+            print("mean for {:.3f} seconds with {} samples = {}".format(end_time - begin_time,
+                                                                                    len(value_list),
+                                                                                    mean_value))
+    
+            return mean_value, next_offset
 
+    def stdeviation(self, offset, duration):
+    
+            sample = self.get(offset)
+            if sample == None:
+                return None, offset
+            next_offset = offset
+    
+            begin_limit = sample["ts"] - duration
+            if self.settings["LOG_LEVEL"] == 1:
+                print("median begin_limit={}".format(begin_limit))
+    
+            begin_time = sample["ts"] # this will be updated as we loop, to find duration available
+            end_time = sample["ts"]
+    
+            #if self.settings["LOG_LEVEL"] == 1:
+            #    print("median_time begin_time {:.3f}".format(begin_time))
+    
+            value_list = [ sample["value"] ]
+            while True: # Repeat .. Until
+                # select previous index in circular buffer
+                next_offset = (next_offset + 1) % self.SAMPLE_HISTORY_SIZE
+                if next_offset == offset:
+                    # we've exhausted the full buffer
+                    break
+    
+                sample = self.get(next_offset)
+    
+                if sample == None:
+                    if self.settings["LOG_LEVEL"] <= 2:
+                        print("median looked back to None value")
+                    # we've exhausted the values in the partially filled buffer
+                    break
+    
+                # see if we have reached the end of the intended period
+                if sample["ts"] < begin_limit:
+                    break
+    
+                value_list.append(sample["value"])
+    
+                begin_time = sample["ts"]
+    
+            # If we didn't get enough samples, return with error
+            if len(value_list) < 3:
+                if self.settings["LOG_LEVEL"] <= 2:
+                    print("stdev not enough samples ({})".format(len(value_list)))
+                return None, None
+    
+            # Now we have a list of samples with the required duration
+            stdev_value = stdev(value_list)
+    
+            #if self.settings["LOG_LEVEL"] == 1:
+            print("stdev for {:.3f} seconds with {} samples = {}".format(end_time - begin_time,
+                                                                                    len(value_list),
+                                                                                    stdev_value))
+    
+            return stdev_value, next_offset

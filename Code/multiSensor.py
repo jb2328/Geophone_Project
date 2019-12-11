@@ -24,6 +24,7 @@ from PIL import ImageDraw
 from PIL import ImageFont
 from PIL import ImageColor
 
+from time_buffer import TimeBuffer
 
 # info sent in json packet to feed handler
 SENSOR_ID = 'footstep_detector'
@@ -44,283 +45,543 @@ FONT_SMALL = ImageFont.truetype('fonts/truetype/freefont/FreeMonoBold.ttf', 10)
 # Declare globals
 LCD=None
 chan=None
+
 runMain=None
 runInterrupt=None
-#allowInterrupt=None
-intensity=None
-#GPIO.setmode(GPIO.BOARD) set to BCM by default 
+allowInterrupt=None
+
+EVENT_NEW="WALKING_PAST"
+
 class Sensor(object):
-	def __init__(self):
-		global LCD
-		global chan
-		
-		global runMain
-		global runInterrupt
-		global allowInterrupt
-		
-		self.SAMPLE_HISTORY_SIZE = 100
-		self.sample_history_index = 0
-		self.sample_history = [None]*self.SAMPLE_HISTORY_SIZE
+        def __init__(self):
+               global LCD
+               global chan
+               
+               global runMain
+               global runInterrupt
+               global allowInterrupt
+               
+               self.SAMPLE_HISTORY_SIZE = 100000
+               self.SAMPLE_EVENT_SIZE = 5
+               
+               self.sample_history_index = 0
+               self.sample_history = [None]*self.SAMPLE_HISTORY_SIZE
 
-		#load config here if have it
+               #DON'T FORGET TO ADD SETTIGNS
+               self.sample_buffer = TimeBuffer(size=self.SAMPLE_HISTORY_SIZE, settings={"LOG_LEVEL":0})
+               self.event_buffer = TimeBuffer(size=self.SAMPLE_EVENT_SIZE, settings=None)
 
-		LCD=self.init_lcd()
-		chan=self.init_geophone()
-		PIN=26
-		
-		GPIO.setup(PIN,GPIO.IN)
-		
-		def mic_callback(PIN):
-		    if GPIO.input(PIN):
-		    	self.sendEventMic()
-		       # print(str(time.time())+" 1")
-		
-		GPIO.add_event_detect(PIN, GPIO.RISING, bouncetime=300)#detects if PIN high or low
-		
-		GPIO.add_event_callback(PIN, callback=mic_callback)
+               self.prev_lcd_update= None
+               self.prev_send_time=None
 
-	def init_lcd(self):
-		LCD=ST7735()
-		LCD.begin()
-		print("starting LCD")
+               self.last_save=time.time()
+               
+               #load config here if have it
+               LCD=self.init_lcd()
+               chan=self.init_geophone()
+               PIN=26
+               self.initScreenNumeric()
 
-		image=Image.new("RGB", (DISPLAY_WIDTH, DISPLAY_HEIGHT), "WHITE")
-		draw = ImageDraw.Draw(image)
+               self.last_event=None
+               self.last_sent=None
+               self.mid_event=False;
+               
+               GPIO.setup(PIN,GPIO.IN)
+               
+               def mic_callback(PIN):
+                   if GPIO.input(PIN):
+                     self.sendEventMic()
+                      # print(str(time.time())+" 1")
+               
+               GPIO.add_event_detect(PIN, GPIO.RISING, bouncetime=300)#detects if PIN high or low
+               
+               GPIO.add_event_callback(PIN, callback=mic_callback)
 
-		draw.text((32,22), "Geophone", fill="BLUE", font=FONT_BIG)
-		draw.text((45,40), "Sensor", fill="BLUE", font=FONT_BIG)
-		draw.text((10,60), "for footstep detection", fill="BLUE", font=FONT_SMALL)
+        def init_lcd(self):
+               LCD=ST7735()
+               LCD.begin()
+               print("starting LCD")
 
-		LCD.display(image)
+               image=Image.new("RGB", (DISPLAY_WIDTH, DISPLAY_HEIGHT), "WHITE")
+               draw = ImageDraw.Draw(image)
 
-		time.sleep(1)
+               draw.text((32,22), "Geophone", fill="BLUE", font=FONT_BIG)
+               draw.text((45,40), "Sensor", fill="BLUE", font=FONT_BIG)
+               draw.text((10,60), "for footstep detection", fill="BLUE", font=FONT_SMALL)
 
-		image=Image.new("RGB", (DISPLAY_WIDTH, DISPLAY_HEIGHT), COLOR_FG)
-		draw = ImageDraw.Draw(image)
+               LCD.display(image)
 
-		LCD.display(image)
+               time.sleep(1)
 
-		return LCD
-		
-	def init_geophone(self):
-		global chan
-				   
-		# Create the I2C bus
-		i2c = busio.I2C(board.SCL, board.SDA)
-			
-		# Create the ADC object using the I2C bus
-		ads = ADS.ADS1015(i2c)
-			
-		# Create differential input between channel 0 and 1
-		chan = AnalogIn(ads, ADS.P0, ADS.P1)
+               image=Image.new("RGB", (DISPLAY_WIDTH, DISPLAY_HEIGHT), COLOR_FG)
+               draw = ImageDraw.Draw(image)
 
-		return chan
+               LCD.display(image)
 
-		
-		
-	def send_data(self,post_data, token):
-		response = requests.post('http://128.232.65.223:80/test/feedmaker/test.feed/general',
-					  headers={'X-Auth-Token': token },
-					  json=post_data
-					  )
-		
-		print("status code",response.status_code)
-	
-	def updateScreenNumeric(self,value):
-		value= "Geophone value: "+str(value)
-		
-		image = Image.new("RGB", (160,20), COLOR_BG)
-		draw = ImageDraw.Draw(image)
-	
-		draw.text((0, 0), value, fill = "WHITE", font = FONT_SMALL)
-	
-		#LCD.LCD_ShowImage(image,0,120,w=160,h=20)
-		LCD.display_window(image,
-						  0,
-						  110,
-						  160,
-						  18)
-	
-		#LCD_Config.Driver_Delay_ms(250)
+               CHART_CONFIG={"x":0,"y":0,"w":161,"h":60,"step":1}
+               self.chart= LCD.add_bar(CHART_CONFIG)
+               
+               return LCD
+               
+        def init_geophone(self):
+               global chan
+                             
+               # Create the I2C bus
+               i2c = busio.I2C(board.SCL, board.SDA)
+                     
+               # Create the ADC object using the I2C bus
+               ads = ADS.ADS1015(i2c)
+                     
+               # Create differential input between channel 0 and 1
+               chan = AnalogIn(ads, ADS.P0, ADS.P1)
 
-	def scrollingBar(self):
-	    BAR_CONFIG={"x":0,"y":0,"w":161,"h":60,"step":1}
-	    lcdBar= LCD.add_bar(BAR_CONFIG)
-	    return lcdBar
-		
-	def intensityBar(self, level):
-		lineThick=10
-			#setup for background
-		image = Image.new("RGB", (DISPLAY_WIDTH, 50), COLOR_BG)
-		draw = ImageDraw.Draw(image)
-		colors=[(0,0,0),(0,200,0),(250,250,0),(255,100,0),(255,0,0),(100,0,0)]
+               return chan
 
-		initY=-lineThick/2
-		for i in range(level):
-			draw.line([(0,initY),(160,initY)], fill =colors[i] ,width = lineThick)
-			initY+=lineThick
+               
+               
+        def send_data(self,post_data, token):
+               response = requests.post('http://128.232.65.223:80/test/feedmaker/test.feed/general',
+                                headers={'X-Auth-Token': token },
+                                json=post_data
+                                )
+               
+               print("status code",response.status_code)
 
-		LCD.display_window(image,
-								  0,
-								  60,
-								  160,
-								  100)
-	
-		
-	def updateIntensityBar(self,value):
-		
-		if(value<=16):
-				self.intensityBar(1)
-				
-		if(value>16 and value<=48):
-			self.intensityBar(2)
+        def initScreenNumeric(self):
+               text= "Geophone value: "# +str(value)
+                       
+               image = Image.new("RGB", (160,20), COLOR_BG)
+               draw = ImageDraw.Draw(image)
+                
+               draw.text((0, 0), text, fill = "WHITE", font = FONT_SMALL)
+                
+                       #LCD.LCD_ShowImage(image,0,120,w=160,h=20)
+               LCD.display_window(image,
+                                           0,
+                                           110,
+                                           160,
+                                           18)
+                                           
+        def updateScreenNumeric(self,value):
+               value= str(value)
+               w=20
+               h=10
+               image = Image.new("RGB", (w,h), COLOR_FG)
+               draw = ImageDraw.Draw(image)
+        
+               draw.text((0, 0), value, fill = "BLACK", font = FONT_SMALL)
+        
+               #LCD.LCD_ShowImage(image,0,120,w=160,h=20)
+               #FIX THIS
+               LCD.display_window(image,
+                                   90, #begin
+                                   110,
+                                   w,#end
+                                   h)
+        
+               #LCD_Config.Driver_Delay_ms(250)
 
-		#draw dark green, light green, yellow
-		if(value>48 and value<=128):
-			self.intensityBar(3)
+        
+               
+        def intensityBar(self, level):
+               lineThick=10
+                     #setup for background
+               image = Image.new("RGB", (DISPLAY_WIDTH, 50), COLOR_BG)
+               draw = ImageDraw.Draw(image)
+               colors=[(0,0,0),(0,200,0),(250,250,0),(255,100,0),(255,0,0),(100,0,0)]
 
-		#draw dark green, light green, yellow, orange
-		if(value>128 and value<=512):
-			self.intensityBar(4)
-		
-		#draw dark green, light green, yellow, orange, red
-		if(value>512 and value<=1024):
-			self.intensityBar(5)		
-			#draw dark green, light green, yellow, orange, red, dark red
-		if(value>1024):
-			self.intensityBar(6)
-	
-	def getValue(self):
-		global chan
-		#time.sleep(0.1)
-		return abs(chan.value)
+               initY=-lineThick/2
+               for i in range(level):
+                     draw.line([(0,initY),(160,initY)], fill =colors[i] ,width = lineThick)
+                     initY+=lineThick
 
-	
-	def loop(self):
-		now = time.time()
-		prevEventSent = now
-		prevLcdUpdate= now
-		lcdBar=self.scrollingBar()
+               LCD.display_window(image,
+                                      0,
+                                      60,
+                                      160,
+                                      100)
+        
+               
+        def updateIntensityBar(self,value):
+               
+               if(value<=16):
+                          self.intensityBar(1)
+                          
+               if(value>16 and value<=48):
+                     self.intensityBar(2)
 
-		global runMain
-		runMain=True
-		global runInterrupt
-		runInterrupt=False
-		global allowInterrupt
-		allowInterrupt=True
-		
+               #draw dark green, light green, yellow
+               if(value>48 and value<=128):
+                     self.intensityBar(3)
 
-		while True:
-			try:
-				now = time.time() # floating point time in seconds since epoch
-				#try:
-				if(runInterrupt==False):
-					allowInterrupt=False
-					print("Main Reading Started (Interrupts not allowed)")
-					intensity=self.getValue()
-					allowInterrupt=True
-					print("Main Reading Finished (Interrupts allowed)")
-				#except:
-				else:
-					intensity=0
-					
-				if (now-prevLcdUpdate >0.15):
-					self.updateScreenNumeric(intensity)
-					self.updateIntensityBar(intensity)
-					lcdBar.next(intensity/5)
-					prevLcdUpdate=time.time()
-				
-				if (now - prevEventSent > 5) or (intensity>32):
-					self.sendEvent(intensity)
-					prevEventSent = time.time()
-	
-			  #  time.sleep(1.0)
-				#print("{:5} now {}, prev {} ".format(intensity, time.ctime(now)[10:20],time.ctime(prevEventSent)[10:20]))
-			#	print("loop finished at {:.3f} secs.".format(time.process_time() - t_start))
-			except (KeyboardInterrupt, SystemExit):
-				self.goodbye_screen()
-				self.finish()
-	
-	def sendEvent(self,sensor_reading):
-		ts=time.time()
-		print ("SENDING DATA {}, {}".format(sensor_reading, time.ctime(ts)))
-		post_data = { 'request_data': [ { 'acp_id': SENSOR_ID,
-										  'acp_type': SENSOR_TYPE,
-										  'acp_ts': ts,
-										  'intensity': sensor_reading,
-										  'acp_units': 'vibration_level',
-										  'mic_reading':0
-														 }
-													  ]
-									}
-		self.send_data(post_data, ACP_TOKEN)
-		time.sleep(0.1)
-		
-		if DEBUG_LOG:
-			 print("loop send data at {:.3f} secs.".format(time.process_time() - t_start))
-			 
-	def sendEventMic(self):
-		print("Attempting Interrupt Start ")
-		global runMain
-		global runInterrupt
-		global allowInterrupt 
-		if(allowInterrupt):
-			runMain=False
-			runInterrupt=True
-			print("Interrupt allowed, Main stopped ")
-			ts=time.time()
-			try:
-				print("Interrupt Reading Start")
-				intensity=self.getValue()
-				print("Interrupt Reading Finished") #sampling getValue() too often can cause an IO error
-			
-			except():
-				print("Failed to read sensor during interrupt")
-				intensity=0
-				
-			print ("SENDING DATA {}, {}, {}".format(intensity, 1, time.ctime(ts)))
-			post_data = { 'request_data': [ { 'acp_id': SENSOR_ID,
-											  'acp_type': SENSOR_TYPE,
-											  'acp_ts': ts,
-											  'intensity': intensity,
-											  'acp_units': 'vibration_level',
-											  'mic_reading':1
-															 }
-														  ]
-										}
-			self.send_data(post_data, ACP_TOKEN)
-			time.sleep(0.1)
-			print("Back to Main, Interrupt finished ")
-			runInterrupt=False
-			runMain=True
-			
-			if DEBUG_LOG:
-				 print("loop send data at {:.3f} secs.".format(time.process_time() - t_start))
-		else:
-			print("Interrupt not allowed")
-	
+               #draw dark green, light green, yellow, orange
+               if(value>128 and value<=512):
+                     self.intensityBar(4)
+               
+               #draw dark green, light green, yellow, orange, red
+               if(value>512 and value<=1024):
+                     self.intensityBar(5)         
+                     #draw dark green, light green, yellow, orange, red, dark red
+               if(value>1024):
+                     self.intensityBar(6)
 
-	def goodbye_screen(self):
-		image=Image.new("RGB", (DISPLAY_WIDTH, DISPLAY_HEIGHT), "BLACK")
-		draw = ImageDraw.Draw(image)
-		draw.text((32,22), "Bye bye", fill="WHITE", font=FONT_BIG)
-		LCD.display(image)
-		time.sleep(1)
-		
-	def finish(self):
-	    print("\n"+"SPI cleanup()...")
-	    LCD.cleanup()
-	    print("\n"+"GPIO cleanup()...")
-	    GPIO.cleanup()
-	    print("Bye bye")
-	    sys.exit()
-	   			
+        def update_lcd(self,ts):
+            global LCD
+            t_start=time.process_time()
+                                  
+            if((self.prev_lcd_update is None) or (ts-self.prev_lcd_update>0.5)):
+
+               # sample_value, offset = self.sample_buffer.median(0,0.25)
+                sample_value=0
+                #get median weight for 1s
+                if not sample_value ==  None:
+                    
+                    if sample_value>16:
+                        sample_value=int(sample_value)
+                        self.updateScreenNumeric(sample_value)
+                        self.updateIntensityBar(sample_value)
+                        self.updateScreenNumeric(sample_value)
+                         
+                self.prev_lcd_update=ts
+                
+       
+           
+            #self.chart.next(latest_sample["value"]/2)
+            latest_sample=self.sample_buffer.get(0)
+            if not latest_sample == None:
+                latest_sample=latest_sample["value"]
+                        
+                self.chart.next(latest_sample/2)
+            
+        def getValue(self):
+            global chan
+            #time.sleep(0.1)
+            return abs(chan.value)
+
+        def latest_buffer_val(self):
+            sample_value, offset = self.sample_buffer.median(0,0.35)
+             #get median weight for 1s
+            latest_sample=self.sample_buffer.get(0)["value"]
+            #print(sample_value, latest_sample)
+            if (not sample_value== None) and (not latest_sample==None):
+                 if(sample_value>latest_sample):
+                    return  sample_value
+                 else:
+                    return latest_sample
+            else:
+                return None
+
+             
+        #true if median for 1s is more than 16 or mic==1
+        #Returns tuple <Test true/false>, <next offset>
+        def test_walk(self,offset):
+            m,next_offset=self.sample_buffer.median(offset,0.25)
+            #print(m, next_offset)
+            if not m==None and m>16: #if not m==None
+                #return (m>16), next_offset
+                return m, next_offset
+            else:
+                return None, None #none none
+                
+        def test_event_new(self,ts):
+            walked, offset=self.test_walk(0)
+            #deleted additinal if statement from sensor.y
+            if walked:
+                return walked
+            else:
+                return None
+
+            
+        def test_event(self, ts):
+            event=self.test_event_new(ts)
+            #print(time.gmtime())
+            thresh=8
+            time_frame=2
+            now=time.time()
+                   
+            
+            if(not self.last_sent is None):
+            	if(now-self.last_sent>time_frame):
+            		print("event finished")
+            	if(event is None and (now-self.last_sent>time_frame)):
+	            	print("DONE")
+	            	print("beat the thresh: ",now-self.last_sent)
+	            	self.send_event(ts,event)
+	            	self.last_sent=None
+	                            	
+            if not event is None:
+            	
+                self.event_buffer.put(ts,event)
+                if(self.last_event is None):
+                    self.last_event=0
+
+
+                print("event delta ", event-16)
+                if (abs(event-16)>thresh and self.last_sent==None):
+                	print("NEW")
+                	print("beat the thresh: ",event-self.last_event)
+                	self.send_event(ts,event)
+                	self.last_sent=now
+                	self.mid_event=True
+
+				#print("event delta ", event-self.last_event)
+				#if ((event-self.last_event)>thresh):
+                print("would have been event")
+               	self.last_sent=now
+                
+                    
+                self.last_event=event
+                
+            if(self.last_sent != None):
+            	if((now-self.last_sent>time_frame) and (self.mid_event==True)):
+            		print("Event Finished")
+            		self.mid_event=False           
+            return event
+
+        def process_sample(self, ts,value):
+           
+            t_start= time.process_time()
+
+            #value=self.getValue()
+            
+            #store reading and timestamp in the buffer
+            self.sample_buffer.put(ts,value)
+
+            #save to buffer csv file
+           # if (ts-self.last_save)>60:
+        #    	self.sample_buffer.save("Wednesday_morning.csv")
+      #      	self.last_save=time.time()
+    #        	print("SAVED")
+                        	
+			#update the screen
+            self.update_lcd(ts)
+
+            #send event to platform
+            self.test_event(ts)
+
+            if self.prev_send_time is None:
+                self.prev_send_time=ts
+                
+            if ts-self.prev_send_time>30:
+                sample_value, offset = self.sample_buffer.median(0,2) # from latest ts, back 2s
+
+                if not sample_value==None:
+                    #print("SENDING READING {:5.1f},{}".format(sample_value, time.ctime(ts)))
+                   # print(sample_value)
+                   # self.send_data(ts, str(sample_value))
+                    self.prev_send_time =ts
+
+                else:
+                    print("process_sample send data at {:5.3f} secs".format(time.process_time()-t_start))
+
+#--------------------------------------#
+#---------------OLD LOOP---------------#
+#--------------------------------------#
+
+        def loop(self):
+               now = time.time()
+               self.prev_send_time = now
+               self.prev_lcd_update= now
+
+               self.initScreenNumeric()
+               
+               global runInterrupt
+               global runMain
+               global allowInterrupt
+
+               runMain=True
+               runInterrupt=False
+               allowInterrupt=True
+               
+
+               while True:
+                     try:
+                          now = time.time() # floating point time in seconds since epoch
+                          #try:
+                          if(runInterrupt==False):
+
+                              allowInterrupt=False
+
+                              if DEBUG_LOG:
+                                 print("Main Reading Started (Interrupts not allowed)")
+
+                              intensity=self.getValue()
+                              allowInterrupt=True
+
+                              if DEBUG_LOG:
+                                 print("Main Reading Finished (Interrupts allowed)")
+
+                            
+                          #except:
+                          #else:
+                          #    intensity=0
+                              
+                          self.chart.next(intensity/2)
+                          
+                          if (now-self.prev_lcd_update >0.15):
+                              self.updateIntensityBar(intensity)
+                              self.updateScreenNumeric(intensity)
+                              self.prev_lcd_update=time.time()
+                          
+                          if (now - self.prev_send_time > 5) or (intensity>32):
+                              self.send_event(now,intensity)
+        
+                       #  time.sleep(1.0)
+                          #print("{:5} now {}, prev {} ".format(intensity, time.ctime(now)[10:20],time.ctime(prevEventSent)[10:20]))
+                     #    print("loop finished at {:.3f} secs.".format(time.process_time() - t_start))
+                     except (KeyboardInterrupt, SystemExit):
+                          self.goodbye_screen()
+                          self.finish()
+        
+        def send_event(self,ts,sensor_reading):
+               
+               print ("SENDING DATA {}, {}".format(sensor_reading, time.ctime(ts)))
+               post_data = { 'request_data': [ { 'acp_id': SENSOR_ID,
+                                                     'acp_type': SENSOR_TYPE,
+                                                     'acp_ts': ts,
+                                                     'intensity': sensor_reading,
+                                                     'acp_units': 'vibration_level',
+                                                     'mic_reading':0
+                                                                      }
+                                                                    ]
+                                            }
+               self.send_data(post_data, ACP_TOKEN)
+               self.prev_send_time = ts              
+              # time.sleep(0.1)
+               
+               if DEBUG_LOG:
+                      print("loop send data at {:.3f} secs.".format(time.process_time() - t_start))
+                      
+        def sendEventMic(self):
+        
+               intensity=self.latest_buffer_val()
+               ts=time.time()         
+                            
+               print ("SENDING DATA {}, {}, {}".format(intensity, 1, time.ctime(ts)))
+               post_data = { 'request_data': [ { 'acp_id': SENSOR_ID,
+                                                           'acp_type': SENSOR_TYPE,
+                                                           'acp_ts': ts,
+                                                           'intensity': intensity,
+                                                           'acp_units': 'vibration_level',
+                                                           'mic_reading':1
+                                                                        }
+                                                                       ]
+                                                   }
+               self.send_data(post_data, ACP_TOKEN)
+
+                 
+               
+                          
+        def sendEventMic_OLD(self):
+
+               if DEBUG_LOG:
+                     print("Attempting Interrupt Start ")
+
+               global runMain
+               global runInterrupt
+               global allowInterrupt 
+
+               if(allowInterrupt):
+
+                     runMain=False
+                     runInterrupt=True
+
+                     if DEBUG_LOG:
+                          print("Interrupt allowed, Main stopped ")
+                          print("Interrupt Reading Start")
+
+                     intensity=self.getValue()
+
+                     if DEBUG_LOG:
+                          print("Interrupt Reading Finished") #sampling getValue() too often can cause an IO error
+                     
+                     ts=time.time()                      
+
+                     print ("SENDING DATA {}, {}, {}".format(intensity, 1, time.ctime(ts)))
+                     post_data = { 'request_data': [ { 'acp_id': SENSOR_ID,
+                                                           'acp_type': SENSOR_TYPE,
+                                                           'acp_ts': ts,
+                                                           'intensity': intensity,
+                                                           'acp_units': 'vibration_level',
+                                                           'mic_reading':1
+                                                                        }
+                                                                       ]
+                                                   }
+                     self.send_data(post_data, ACP_TOKEN)
+
+                    # time.sleep(0.1)
+
+                     if DEBUG_LOG:
+                          print("Back to Main, Interrupt finished ")
+
+                     runInterrupt=False
+                     runMain=True
+                     
+                     if DEBUG_LOG:
+                           print("loop send data at {:.3f} secs.".format(time.process_time() - t_start))
+               else:
+                     if DEBUG_LOG:
+                          print("Interrupt not allowed")
+        
+
+        def goodbye_screen(self):
+               image=Image.new("RGB", (DISPLAY_WIDTH, DISPLAY_HEIGHT), "BLACK")
+               draw = ImageDraw.Draw(image)
+               draw.text((32,22), "Bye bye", fill="WHITE", font=FONT_BIG)
+               LCD.display(image)
+               time.sleep(1)
+               
+        def finish(self):
+
+            self.goodbye_screen()
+            
+            print("\n"+"SPI cleanup()...")
+            LCD.cleanup()
+            print("\n"+"GPIO cleanup()...")
+            GPIO.cleanup()
+            print("Bye bye")
+            sys.exit()
+                    
 ##main code
 
-if __name__ =="__main__":
+def loop():
+	
 	g=Sensor()
+	counter=0
+	LOOP_TIME=0.05
+	try:
+		while True:
+			start_time=time.time()
+			value=g.getValue()
+			g.process_sample(start_time, value)
+			now=time.time()
+			foo=LOOP_TIME-(now-start_time)
+			if foo>0:
+				time.sleep(foo)
+	except (KeyboardInterrupt, SystemExit):
+		pass
+		g.finish()
 
-	g.loop()
-	print("Bye ")
-#	g.finish()
+def test():
+    s = Sensor()
+
+# for playback we can specify
+#   sleep=0.1 for a fixed period between samples
+# or
+#   realtime=True which will pause the time between recorded sample timestamps.
+# otherwise the playback will be as fast as possible.
+
+    t = TimeBuffer(size=6000, settings={"LOG_LEVEL":0})
+    print("loading buffer")
+    t.load('sensor_play.csv')
+    print("loaded data")
+    
+    t.play(s.process_sample, realtime=True)
+
+if __name__ =="__main__":
+
+        #loop()
+        test()
+        #g.loop()
+       
 
