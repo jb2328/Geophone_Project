@@ -50,7 +50,9 @@ runMain=None
 runInterrupt=None
 allowInterrupt=None
 
-EVENT_NEW="WALKING_PAST"
+EVENT_S="START"
+EVENT_F="FINISH"
+
 
 class Sensor(object):
         def __init__(self):
@@ -62,7 +64,7 @@ class Sensor(object):
                global allowInterrupt
                
                self.SAMPLE_HISTORY_SIZE = 100000
-               self.SAMPLE_EVENT_SIZE = 5
+               self.SAMPLE_EVENT_SIZE = 30
                
                self.sample_history_index = 0
                self.sample_history = [None]*self.SAMPLE_HISTORY_SIZE
@@ -70,6 +72,9 @@ class Sensor(object):
                #DON'T FORGET TO ADD SETTIGNS
                self.sample_buffer = TimeBuffer(size=self.SAMPLE_HISTORY_SIZE, settings={"LOG_LEVEL":0})
                self.event_buffer = TimeBuffer(size=self.SAMPLE_EVENT_SIZE, settings=None)
+
+               self.event_buffer.put(time.time(),"Begin")
+               
 
                self.prev_lcd_update= None
                self.prev_send_time=None
@@ -274,17 +279,25 @@ class Sensor(object):
              
         #true if median for 1s is more than 16 or mic==1
         #Returns tuple <Test true/false>, <next offset>
-        def test_walk(self,offset):
-            m,next_offset=self.sample_buffer.median(offset,0.25)
+        def test_walk(self,offset,duration):
+           # m,next_offset=self.sample_buffer.median(offset,duration)
+            
             #print(m, next_offset)
+            if duration ==2:
+                n,next_offset2=self.sample_buffer.median(offset,duration)
+                
+                return n,next_offset2
+            else:
+                m,next_offset=self.sample_buffer.median(offset,duration)
+                
             if not m==None and m>16: #if not m==None
                 #return (m>16), next_offset
                 return m, next_offset
             else:
                 return None, None #none none
                 
-        def test_event_new(self,ts):
-            walked, offset=self.test_walk(0)
+        def test_event_new(self,offset, duration):
+            walked, offset=self.test_walk(offset, duration)
             #deleted additinal if statement from sensor.y
             if walked:
                 return walked
@@ -293,50 +306,34 @@ class Sensor(object):
 
             
         def test_event(self, ts):
-            event=self.test_event_new(ts)
-            #print(time.gmtime())
-            thresh=8
-            time_frame=2
-            now=time.time()
-                   
-            
-            if(not self.last_sent is None):
-            	if(now-self.last_sent>time_frame):
-            		print("event finished")
-            	if(event is None and (now-self.last_sent>time_frame)):
-	            	print("DONE")
-	            	print("beat the thresh: ",now-self.last_sent)
-	            	self.send_event(ts,event)
-	            	self.last_sent=None
-	                            	
-            if not event is None:
-            	
-                self.event_buffer.put(ts,event)
-                if(self.last_event is None):
-                    self.last_event=0
+            event_S=self.test_event_new(0,0.25)
+            event_F=self.test_event_new(0,2)
+           # ts=time.time()
 
+            print("S,F: ", event_S,event_F)    
 
-                print("event delta ", event-16)
-                if (abs(event-16)>thresh and self.last_sent==None):
-                	print("NEW")
-                	print("beat the thresh: ",event-self.last_event)
-                	self.send_event(ts,event)
-                	self.last_sent=now
-                	self.mid_event=True
-
-				#print("event delta ", event-self.last_event)
-				#if ((event-self.last_event)>thresh):
-                print("would have been event")
-               	self.last_sent=now
+            #Catch beginning of event
+            if not event_S is None:
+               # print("event delta ", event_S-16)
                 
-                    
-                self.last_event=event
-                
-            if(self.last_sent != None):
-            	if((now-self.last_sent>time_frame) and (self.mid_event==True)):
-            		print("Event Finished")
-            		self.mid_event=False           
-            return event
+                if (event_S>31 and self.event_buffer.get(0)["value"]!=EVENT_S):
+                    print("NEW Started")
+                    self.event_buffer.put(ts,EVENT_S)
+                    self.send_event(ts,EVENT_S)
+
+            if not event_F is None:
+                if(event_F<=8 and self.event_buffer.get(0)["value"]!=EVENT_F and self.event_buffer.get(0)["value"]!="Begin"):
+                    if event_S is None:
+                        print("NEW Finished")
+                        self.event_buffer.put(ts,EVENT_F)
+                        self.send_event(ts,EVENT_F)
+                        
+                        
+#                   self.mid_event=False      
+            for i in range(self.SAMPLE_EVENT_SIZE):
+                if not self.event_buffer.get(i) is None:
+                    print(self.event_buffer.get(i))
+            #return event
 
         def process_sample(self, ts,value):
            
@@ -349,11 +346,11 @@ class Sensor(object):
 
             #save to buffer csv file
            # if (ts-self.last_save)>60:
-        #    	self.sample_buffer.save("Wednesday_morning.csv")
-      #      	self.last_save=time.time()
-    #        	print("SAVED")
-                        	
-			#update the screen
+        #       self.sample_buffer.save("Wednesday_morning.csv")
+      #         self.last_save=time.time()
+    #           print("SAVED")
+                                
+                     #update the screen
             self.update_lcd(ts)
 
             #send event to platform
@@ -545,22 +542,22 @@ class Sensor(object):
 ##main code
 
 def loop():
-	
-	g=Sensor()
-	counter=0
-	LOOP_TIME=0.05
-	try:
-		while True:
-			start_time=time.time()
-			value=g.getValue()
-			g.process_sample(start_time, value)
-			now=time.time()
-			foo=LOOP_TIME-(now-start_time)
-			if foo>0:
-				time.sleep(foo)
-	except (KeyboardInterrupt, SystemExit):
-		pass
-		g.finish()
+        
+        g=Sensor()
+        counter=0
+        LOOP_TIME=0.05
+        try:
+               while True:
+                     start_time=time.time()
+                     value=g.getValue()
+                     g.process_sample(start_time, value)
+                     now=time.time()
+                     foo=LOOP_TIME-(now-start_time)
+                     if foo>0:
+                          time.sleep(foo)
+        except (KeyboardInterrupt, SystemExit):
+               pass
+               g.finish()
 
 def test():
     s = Sensor()
@@ -570,13 +567,12 @@ def test():
 # or
 #   realtime=True which will pause the time between recorded sample timestamps.
 # otherwise the playback will be as fast as possible.
-
     t = TimeBuffer(size=6000, settings={"LOG_LEVEL":0})
     print("loading buffer")
-    t.load('sensor_play.csv')
+    t.load('CSVs/sensor_play.csv')
     print("loaded data")
     
-    t.play(s.process_sample, realtime=True)
+    t.play(s.process_sample, realtime=False)
 
 if __name__ =="__main__":
 
