@@ -185,7 +185,6 @@ function generateEquidistantCoords(N){
 function getEquidistantVector(R,N,T){
   let a=height/2;  //let k=20;
   let r=R
-  let n=N;
   
   let TN_root=Math.sqrt(T*N);
   
