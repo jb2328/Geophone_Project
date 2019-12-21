@@ -30,7 +30,7 @@ from statistics import mean
 from statistics import stdev
 
 
-DEFAULT_SETTINGS = { "LOG_LEVEL": 3 } # we need to pass this in the instantiation...
+DEFAULT_SETTINGS = { "LOG_LEVEL": 0 } # we need to pass this in the instantiation...
 
 class TimeBuffer(object):
 
@@ -389,7 +389,63 @@ class TimeBuffer(object):
                                                                                     mean_value))
     
             return mean_value, next_offset
-
+            
+    def maximum(self, offset, duration):
+                DEBUG=True
+                sample = self.get(offset)
+                if sample == None:
+                    return None, offset
+                next_offset = offset
+        
+                begin_limit = sample["ts"] - duration
+                if DEBUG:
+                    print("max begin_limit={}".format(begin_limit))
+        
+                begin_time = sample["ts"] # this will be updated as we loop, to find duration available
+                end_time = sample["ts"]
+        
+                #if self.settings["LOG_LEVEL"] == 1:
+                #    print("median_time begin_time {:.3f}".format(begin_time))
+        
+                value_list = [ sample["value"] ]
+                while True: # Repeat .. Until
+                    # select previous index in circular buffer
+                    next_offset = (next_offset + 1) % self.SAMPLE_HISTORY_SIZE
+                    if next_offset == offset:
+                        # we've exhausted the full buffer
+                        break
+        
+                    sample = self.get(next_offset)
+        
+                    if sample == None:
+                        if DEBUG:
+                            print("max looked back to None value")
+                        # we've exhausted the values in the partially filled buffer
+                        break
+        
+                    # see if we have reached the end of the intended period
+                    if sample["ts"] < begin_limit:
+                        break
+        
+                    value_list.append(sample["value"])
+        
+                    begin_time = sample["ts"]
+        
+                # If we didn't get enough samples, return with error
+                if len(value_list) < 3:
+                    if DEBUG:
+                        print("max not enough samples ({})".format(len(value_list)))
+                    return None, None
+        
+                # Now we have a list of samples with the required duration
+                max_value = max(value_list)
+        
+                #if self.settings["LOG_LEVEL"] == 1:
+                print("max for {:.3f} seconds with {} samples = {}".format(end_time - begin_time,
+                                                                                        len(value_list),
+                                                                                        max_value))
+        
+                return max_value, next_offset
     def stdeviation(self, offset, duration):
     
             sample = self.get(offset)
@@ -446,3 +502,5 @@ class TimeBuffer(object):
                                                                                     stdev_value))
     
             return stdev_value, next_offset
+
+            

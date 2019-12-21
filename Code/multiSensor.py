@@ -71,6 +71,8 @@ class Sensor(object):
 
                #DON'T FORGET TO ADD SETTIGNS
                self.sample_buffer = TimeBuffer(size=self.SAMPLE_HISTORY_SIZE, settings={"LOG_LEVEL":0})
+               self.raw_buffer = TimeBuffer(size=self.SAMPLE_HISTORY_SIZE, settings={"LOG_LEVEL":0})
+               
                self.event_buffer = TimeBuffer(size=self.SAMPLE_EVENT_SIZE, settings=None)
 
                self.event_buffer.put(time.time(),"Begin")
@@ -80,7 +82,8 @@ class Sensor(object):
                self.prev_send_time=None
 
                self.last_save=time.time()
-               
+
+               self.prev=None
                #load config here if have it
                LCD=self.init_lcd()
                chan=self.init_geophone()
@@ -90,6 +93,9 @@ class Sensor(object):
                self.last_event=None
                self.last_sent=None
                self.mid_event=False;
+
+               self.event_start=None
+               self.event_finish=None
                
                GPIO.setup(PIN,GPIO.IN)
                
@@ -256,7 +262,7 @@ class Sensor(object):
             if not latest_sample == None:
                 latest_sample=latest_sample["value"]
                         
-                self.chart.next(latest_sample/2)
+                self.chart.next(latest_sample*3)#/2
             
         def getValue(self):
             global chan
@@ -279,22 +285,21 @@ class Sensor(object):
              
         #true if median for 1s is more than 16 or mic==1
         #Returns tuple <Test true/false>, <next offset>
-        def test_walk(self,offset,duration):
-           # m,next_offset=self.sample_buffer.median(offset,duration)
+        def test_walk_avg(self,offset,duration):
+            m,next_offset=self.sample_buffer.mean(offset,duration)
             
-            #print(m, next_offset)
-            if duration ==2:
-                n,next_offset2=self.sample_buffer.median(offset,duration)
-                
-                return n,next_offset2
+            if not m==None:
+                return m
             else:
-                m,next_offset=self.sample_buffer.median(offset,duration)
-                
-            if not m==None and m>16: #if not m==None
-                #return (m>16), next_offset
-                return m, next_offset
-            else:
-                return None, None #none none
+                return None #none none
+
+        def test_walk_med(self,offset,duration):
+                    m,next_offset=self.sample_buffer.median(offset,duration)
+                    
+                    if not m==None:
+                        return m
+                    else:
+                        return None #none none
                 
         def test_event_new(self,offset, duration):
             walked, offset=self.test_walk(offset, duration)
@@ -306,34 +311,72 @@ class Sensor(object):
 
             
         def test_event(self, ts):
-            event_S=self.test_event_new(0,0.25)
-            event_F=self.test_event_new(0,2)
+            event_S=self.test_walk_med(0,0.25)#0.5
+            event_F=self.test_walk_med(0,1)#2
            # ts=time.time()
 
-            print("S,F: ", event_S,event_F)    
+           # print("S,F: ", event_S,event_F)    
 
             #Catch beginning of event
             if not event_S is None:
                # print("event delta ", event_S-16)
                 
-                if (event_S>31 and self.event_buffer.get(0)["value"]!=EVENT_S):
+                if (event_S>3 and self.event_buffer.get(0)["value"]!=EVENT_S):#event_S>40
                     print("NEW Started")
+                    self.chart.next(1000)
+                    
+                    self.event_start=ts
                     self.event_buffer.put(ts,EVENT_S)
-                    self.send_event(ts,EVENT_S)
-
-            if not event_F is None:
-                if(event_F<=8 and self.event_buffer.get(0)["value"]!=EVENT_F and self.event_buffer.get(0)["value"]!="Begin"):
-                    if event_S is None:
+                    self.send_event(ts,EVENT_S,0,0,0,0)
+                    #send_event(self,ts,sensor_reading,dur, med,mean):
+            if not event_F is None and not event_S is None:
+            
+                if(self.event_buffer.get(0)["value"]!=EVENT_F and self.event_buffer.get(0)["value"]!="Begin"):
+                    if (event_F<1 and event_S<1) :#if (event_F<10 and event_S is None)
+                        self.chart.next(1000)
+                    
+                        self.event_finished=ts
                         print("NEW Finished")
+                        dur=  self.event_finished- self.event_start
+                        
+                        med,a=self.raw_buffer.median(0,dur+0.5)
+                        mean,a=self.raw_buffer.average(0,dur+0.5)
+                        max_val,a=self.raw_buffer.maximum(0,dur+0.5)
+                        if(max_val<16):
+                            max_val=16
                         self.event_buffer.put(ts,EVENT_F)
-                        self.send_event(ts,EVENT_F)
+                        self.send_event(ts,EVENT_F,dur, med, mean,max_val)
+
+                        for i in range(self.SAMPLE_EVENT_SIZE):
+                            if not self.event_buffer.get(i) is None:
+                                print(self.event_buffer.get(i))
+                        
                         
                         
 #                   self.mid_event=False      
-            for i in range(self.SAMPLE_EVENT_SIZE):
-                if not self.event_buffer.get(i) is None:
-                    print(self.event_buffer.get(i))
+          
             #return event
+
+            
+        def moving_average(self, value,perc,cutoff):
+            if self.prev==None:
+                self.prev=value
+            value=self.prev*(1-perc)+value*(perc)#self.prev*(perc)+value*(1-perc)
+            #print(value, self.prev)
+            self.prev=value
+            
+            if(value<cutoff):
+                value =0
+            return value
+            
+        def clean_sample(self, value):
+            value=value -16
+            if(value<0):
+                return 0
+            elif(value>100):
+                return 100
+            else:
+                 return value
 
         def process_sample(self, ts,value):
            
@@ -342,6 +385,12 @@ class Sensor(object):
             #value=self.getValue()
             
             #store reading and timestamp in the buffer
+            value=self.clean_sample(value)
+            #raw value
+            self.raw_buffer.put(ts,value)
+            
+            value=self.moving_average(value, 0.05,1)#0.05,20
+            #print(og,value)
             self.sample_buffer.put(ts,value)
 
             #save to buffer csv file
@@ -430,13 +479,17 @@ class Sensor(object):
                           self.goodbye_screen()
                           self.finish()
         
-        def send_event(self,ts,sensor_reading):
+        def send_event(self,ts,sensor_reading,dur, med,mean,max_val):
                
                print ("SENDING DATA {}, {}".format(sensor_reading, time.ctime(ts)))
                post_data = { 'request_data': [ { 'acp_id': SENSOR_ID,
                                                      'acp_type': SENSOR_TYPE,
                                                      'acp_ts': ts,
                                                      'intensity': sensor_reading,
+                                                     'duration': dur,
+                                                     'median': med,
+                                                     'mean': mean,
+                                                     'max':max_val,
                                                      'acp_units': 'vibration_level',
                                                      'mic_reading':0
                                                                       }
@@ -565,11 +618,11 @@ def test():
 # for playback we can specify
 #   sleep=0.1 for a fixed period between samples
 # or
-#   realtime=True which will pause the time between recorded sample timestamps.
+#   realtime=True which will pause the time betweesn recorded sample timestamps.
 # otherwise the playback will be as fast as possible.
     t = TimeBuffer(size=6000, settings={"LOG_LEVEL":0})
     print("loading buffer")
-    t.load('CSVs/sensor_play.csv')
+    t.load('CSVs/sensor_play.csv')#sensor_play
     print("loaded data")
     
     t.play(s.process_sample, realtime=False)
