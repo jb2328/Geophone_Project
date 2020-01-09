@@ -7,29 +7,12 @@
     <link rel="shortcut icon" type="image/png" href="/static_web/images/favicon.png"/>
 
     <title>JBJB</title>
-<!--
-RELEASE INFO:
-    2018-10-22 rtroute real-time analyze along journey WIP
-    2018-10-18 rtmonitor_api.js added to replace rtroute.js rtmonitor access
-    2018-10-15 rt_tracker.js added to hold probablistic bus tracking code
-    2018-08-31 rtroute_config.js added to store non-Git URL's and API token
-    2017-12-10 added progress vector, improved record, replay, logging
-    2017-12-08 moved JS into rtroute.js.
-               Replay with sample trip
-               Shims for sirivm_to_journey_id and vehicle_journey_id_to_route
-               'state' code for buses e.g. route_index, segment_probability
-               Route segment probabilities based on sirivm -> segment distance
-               Route segment probabilities based on current route_index
-    2017-12-01 imported stops, journeys and trip data, draw_stops and draw_route code
-    2017-11-30 Moved code into rtroute.html to experiment with route calculations
-    ----
-    2017-11-26 generalized from buses, latest full data in popup, icon resize on old data,
-               map can go fullscreen
-    2017-11-25 supports connect, close, subscribe, request with filters '=' and 'inside'
-                console log using divs, draw polygon, clear icons
-    2017-11-14 page working for connect, subscribe, close
-    2017-11-11 initial version to connect websocket to vertx rtmonitor
--->
+    <script src="https://d3js.org/d3.v5.min.js"></script>
+        <script src="https://unpkg.com/d3-interpolate-path/build/d3-interpolate-path.min.js"></script>
+        <script src="https://d3js.org/d3-color.v1.min.js"></script>
+        <script src="https://d3js.org/d3-interpolate.v1.min.js"></script>
+
+<!--RELEASE INFO: -->
 
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.2.0/dist/leaflet.css" />
@@ -63,8 +46,7 @@ var test_sirivm_journey = {};
 
 <!-- Non-version-controled config parameters -->
 <script src="rtroute_config.js"></script>
-<!--P5 LIBRARY -->
-<script type="text/javascript" src="p5.min.js"></script>
+
 
 </head>
 
@@ -84,13 +66,6 @@ var test_sirivm_journey = {};
 <div class="control_heading">Real-time requests and subscriptions</div>
 
 
-<br>
-<h7>Data Vis</h7>
-<!--
-<script src="p5_sketch.js"></script>
--->
-<div id="dataVis"></div>
-<br>
 
 
 <div class="control_box">
@@ -123,27 +98,8 @@ var test_sirivm_journey = {};
         ></input>
 </div>
 
-<div class="control_heading">Console log options</div>
-<div class="control_box">
-    <div class="toggle_option">Log oldest top: <input id="log_append" type="checkbox" onclick="click_log_append()"/></div>
-    <div class="toggle_option">Log data records: <input id="log_data" type="checkbox" onclick="click_log_data()"/></div>
-    <input type="button" onclick="log_clear()"
-        title="Clear log"
-        value="Clear"
-        ></input>
-</div>
-<div class="control_heading">Data recording</div>
-<div class="control_box">
-    <input type="button" id="record_start" onclick="record_start()" value="Record"
-        title="Record the data as it arrives"
-        ></input>
-    <input type="button" id="record_clear" onclick="record_clear()" value="Clear"
-        title="Cancel recording"
-        ></input>
-    <input type="button" id="record_print" onclick="record_print()" value="Print"
-        title="Print the recorded data to the console"
-        ></input>
-</div>
+
+
 <!-- TEST BUTTONS are added by javascript into this div -->
 <div id="test_buttons">
 </div>
@@ -159,21 +115,34 @@ var test_sirivm_journey = {};
   <button class="verticle_button" onclick="rt_next_msg('rt_scratchpad')">&gt;</button>
 </div>
 
-<textarea rows="25" cols="50" id="rt_scratchpad">
+<textarea rows="20" cols="25" id="rt_scratchpad">
 { "msg_type": "rt_subscribe",
   "request_id": "A",
   "filters" : [
-                {"test": "=",
+                <!-- {"test": "=",
 		 "key": "VehicleRef",
                  "value": "ABC"
-                }
+                } -->
               ]
 }
 </textarea>
 </div>
 
 </div> <!-- end of control_div -->
-
+<div class="D3">
+    <h7>Data Vis</h7>
+    
+        <h1 id='trans' onclick="initiateTransition()">Transition</h1>
+        <h3 onclick="addEvents(1)">Add</h3>
+        <h3 onclick="deleteEvents(1)">Delete</h3>
+        <h3 onclick="shiftEvents(1)">Shift</h3>
+    
+    <br>
+    
+          <script src="d3_sketch.js"></script>
+          <h2 id='val'> </h2>
+    
+    </div>
 <!-- progress -->
 <div id="progress_div" class="progress_div">
 </div>
@@ -182,6 +151,10 @@ var test_sirivm_journey = {};
 
 <!-- console log -->
 <div id="log_div"></div>
+
+
+
+<br>
 
 
 </body>

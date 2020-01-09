@@ -352,21 +352,6 @@ function init()
 } // end init()
 
 
-//p5.js test functions
-
-// function setup(){
-// 	var cnv=createCanvas(200,100);
-// 	cnv.parent('dataVis');
-// 	background(0);
-// //	init();
-// }
-// function draw(){
-//     background(150);
-//     let val = parseInt(msg_list[0]);
-//     text(val,10,10)
-//     fill(255,0,0);
-//     ellipse(width/2, height/2, val,val);
-// }
 
 	
 
@@ -403,7 +388,11 @@ function handle_msg(msg, clock_time)
     }
 
     var sensor_id = msg[RECORD_INDEX];
-    console.log("Got message: "+JSON.stringify(msg["intensity"]));
+     console.log("Incoming: "+JSON.stringify(msg["intensity"]));//msg["intensity"])--> FINISH
+    
+    console.log("Got message: "+JSON.stringify(msg));//msg["intensity"])--> FINISH
+
+    addEvents(1,msg["intensity"],msg["max"]);
 
     // If an existing entry in 'sensors' has this key, then update
     // otherwise create new entry.

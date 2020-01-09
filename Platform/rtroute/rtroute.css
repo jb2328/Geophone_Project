@@ -23,6 +23,12 @@ position: sticky;
 border: 3px solid #73AD21
 }
 */
+.tooltip {
+    position: absolute;
+    width: 200px;
+    height: 28px;
+    pointer-events: none;
+  }
 
 .map_container {
     width: auto;
@@ -53,6 +59,10 @@ border: 3px solid #73AD21
 .control_heading {
     font-weight: bold;
 }
+.D3{
+
+
+}
 
 .scratchpad_box {
     width: 100%;
@@ -61,26 +71,26 @@ border: 3px solid #73AD21
 
 .control_div {
     /* display: inline-block;*/
-    width: 100%;
+    width: 50%;
     min-width: 250px;
     /* max-width: 400px; */
-    height: 80%;
+    height: 50%;
     /* float: left; */
-    overflow-y: scroll;
+    /* overflow-y: scroll; */
 }
 
 .progress_div {
     /* display: inline-block; */
     background-color: lightblue;
     height: 5%;
-    width: 100%;
+    width: 10%;
     vertical-align: top;
     float: left;
 }
 
 .progress_canvas {
-    height: 100%;
-    width: 100%;
+    height: 10%;
+    width: 10%;
 }
 
 .sensor-popup {
